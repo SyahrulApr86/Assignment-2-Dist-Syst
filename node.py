@@ -23,13 +23,24 @@ def send_message(node_id, port):
     logger.debug("Send the message")
     client_socket.sendto(message, addr)
 
-def sending_procedure(heartbeat_duration, node_id, neighbors_port, node_ports, main_port):
+def sending_procedure(heartbeat_duration, node_id, neighbors_port, node_ports, main_port, num_of_neighbors_to_choose):
     logger.info("Sending Procedure Thread Created")
     # TODO
     # Create a socket to send the heartbeat to the neighbors and main node
     # Arguments: Heartbeat duration, this Node ID, Neighbors port, Node ports, Main Node port
     # Note: use send_message function to send the heartbeat
     ""
+    logger.info("Sending Procedure Thread Created")
+    while True:
+        time.sleep(heartbeat_duration)
+        logger.info(f"Increase heartbeat node-{node_id}:")
+        status_dictionary[f"node-{node_id}"][0] += 1
+        logger.info(pformat(status_dictionary))
+        logger.info("Determining which node to send...")
+        selected_ports = random.sample(neighbors_port, min(len(neighbors_port), num_of_neighbors_to_choose))
+        for port in selected_ports:
+            send_message(node_id, port)
+        send_message(node_id, main_port)
 
 def fault_timer_procedure(node_id, fault_duration):
     for key in status_dictionary.keys():
@@ -45,12 +56,34 @@ def tcp_listening_procedure(port, node_id):
     # Create a TCP socket to listen to the main node
     # Arguments: Main Node port, Node ID
     ""
-                    
+    logger.info("Initiating TCP socket")
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(("127.0.0.1", port))
+    server_socket.listen(5)
+    while True:
+        client_socket, addr = server_socket.accept()
+        data = client_socket.recv(1024).decode("UTF-8")
+        if data == "status":
+            client_socket.send(str(status_dictionary).encode("UTF-8"))
+        client_socket.close()
 def listening_procedure(port, node_id, fault_duration):
     # TODO
     # Create a UDP socket to listen to all other node
     # Arguments: This Node's port, Node ID, fault duration
     ""
+    logger.info("Listening Procedure Started")
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server_socket.bind(("127.0.0.1", port))
+    while True:
+        data, addr = server_socket.recvfrom(1024)
+        message = data.decode("UTF-8")
+        node_id, received_status_dict = message.split("#", 1)
+        received_status_dict = literal_eval(received_status_dict)
+        for key, value in received_status_dict.items():
+            if key not in status_dictionary or status_dictionary[key][0] < received_status_dict[key][0]:
+                status_dictionary[key] = received_status_dict[key]
+                # Reset the fault timer if the received heartbeat is newer
+                fault_timer_procedure(node_id, fault_duration)
 
 def handle_exception(exc_type, exc_value, exc_traceback):
     logger.error(f"Uncaught exception handler", exc_info=(exc_type, exc_value, exc_traceback))
@@ -107,7 +140,7 @@ def main(heartbeat_duration=1, num_of_neighbors_to_choose=1,
         logger.info("Executing the sending procedure")
         thread = threading.Thread(target=sending_procedure,
                          args=(heartbeat_duration,
-                               node_id, neighbors_ports, node_ports, main_port))
+                               node_id, neighbors_ports, node_ports, main_port, num_of_neighbors_to_choose))
         thread.name = "sending_thread"
         thread.start()
     except Exception as e:

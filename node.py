@@ -24,7 +24,6 @@ def send_message(node_id, port):
     client_socket.sendto(message, addr)
 
 def sending_procedure(heartbeat_duration, node_id, neighbors_port, node_ports, main_port, num_of_neighbors_to_choose):
-    logger.info("Sending Procedure Thread Created")
     # TODO
     # Create a socket to send the heartbeat to the neighbors and main node
     # Arguments: Heartbeat duration, this Node ID, Neighbors port, Node ports, Main Node port
@@ -35,23 +34,17 @@ def sending_procedure(heartbeat_duration, node_id, neighbors_port, node_ports, m
         time.sleep(heartbeat_duration)
         logger.info(f"Increase heartbeat node-{node_id}:")
         status_dictionary[f"node-{node_id}"][0] += 1
+        status_dictionary[f"node-{node_id}"][1] = True
         logger.info(pformat(status_dictionary))
         logger.info("Determining which node to send...")
         selected_ports = random.sample(neighbors_port, min(len(neighbors_port), num_of_neighbors_to_choose))
+        logger.info(f"Send messages to main node, {', '.join([f'node-{node_ports[port]}' for port in selected_ports])}")
         for port in selected_ports:
             send_message(node_id, port)
         send_message(node_id, main_port)
 
-def fault_timer_procedure(node_id, fault_duration):
-    for key in status_dictionary.keys():
-        logger.debug(f"key: {key}")
-        if key == node_id:
-            continue
-        thread = threading.Timer(fault_duration, start_fault_timer, (key,))
-        thread.start()
         
 def tcp_listening_procedure(port, node_id):
-    logger.info("Initiating TCP socket")
     # TODO
     # Create a TCP socket to listen to the main node
     # Arguments: Main Node port, Node ID
@@ -62,28 +55,79 @@ def tcp_listening_procedure(port, node_id):
     server_socket.listen(5)
     while True:
         client_socket, addr = server_socket.accept()
-        data = client_socket.recv(1024).decode("UTF-8")
-        if data == "status":
-            client_socket.send(str(status_dictionary).encode("UTF-8"))
-        client_socket.close()
+        with client_socket:
+            message = f"node-{node_id}#{status_dictionary}".encode("UTF-8")
+            client_socket.send(message)
+
+
 def listening_procedure(port, node_id, fault_duration):
-    # TODO
-    # Create a UDP socket to listen to all other node
-    # Arguments: This Node's port, Node ID, fault duration
-    ""
-    logger.info("Listening Procedure Started")
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server_socket.bind(("127.0.0.1", port))
-    while True:
-        data, addr = server_socket.recvfrom(1024)
-        message = data.decode("UTF-8")
-        node_id, received_status_dict = message.split("#", 1)
-        received_status_dict = literal_eval(received_status_dict)
-        for key, value in received_status_dict.items():
-            if key not in status_dictionary or status_dictionary[key][0] < received_status_dict[key][0]:
-                status_dictionary[key] = received_status_dict[key]
-                # Reset the fault timer if the received heartbeat is newer
-                fault_timer_procedure(node_id, fault_duration)
+    fault_timers = {}
+
+    # Inisialisasi timer kegagalan untuk semua node kecuali diri sendiri
+    for key in status_dictionary:
+        if key != f'node-{node_id}':
+            timer = threading.Timer(fault_duration, start_fault_timer, [key])
+            timer.start()
+            fault_timers[key] = timer
+
+    logger.info("Start the timer for fault duration...")
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp_server_socket:
+        udp_server_socket.bind(("127.0.0.1", port))
+        logger.info("UDP server socket bound and listening.")
+
+        while True:
+            try:
+                data, addr = udp_server_socket.recvfrom(1024)
+                process_received_data(data, node_id, fault_duration, fault_timers)
+            except socket.timeout:
+                logger.info("Socket receive timed out.")
+
+
+def process_received_data(data, node_id, fault_duration, fault_timers):
+    sender_node_id, sender_status_dict = parse_received_data(data)
+    logger.info(f"Data received from node-{sender_node_id}. Processing...")
+
+    for key, value in sender_status_dict.items():
+        compare_and_update_status(key, value, node_id, fault_duration, fault_timers)
+
+
+def parse_received_data(data):
+    decoded_data = data.decode("UTF-8")
+    sender_node_id, status_dict_str = decoded_data.split("#", 1)
+    status_dict = literal_eval(status_dict_str)
+    return int(sender_node_id.split("-")[1]), status_dict
+
+
+def compare_and_update_status(key, value, node_id, fault_duration, fault_timers):
+    current_status = status_dictionary.get(key, [0, False])
+    incoming_heartbeat, is_alive = value
+
+    # Logika pembaruan status
+    if need_to_update_status(current_status, value):
+        status_dictionary[key] = value
+        if need_to_restart_fault_timer(is_alive, current_status, value):
+            restart_fault_timer(key, fault_duration, fault_timers)
+
+    logger.info(f"Status updated: {status_dictionary}")
+
+
+def need_to_update_status(current_status, incoming_status):
+    return incoming_status[0] > current_status[0] or (
+                incoming_status[1] != current_status[1] and incoming_status[0] >= current_status[0])
+
+
+def need_to_restart_fault_timer(is_alive, current_status, incoming_status):
+    return is_alive or current_status[1] != incoming_status[1]
+
+
+def restart_fault_timer(key, fault_duration, fault_timers):
+    if key in fault_timers:
+        fault_timers[key].cancel()
+    fault_timers[key] = threading.Timer(fault_duration, start_fault_timer, [key])
+    fault_timers[key].start()
+    logger.info(f"Fault timer restarted for {key}.")
+
 
 def handle_exception(exc_type, exc_value, exc_traceback):
     logger.error(f"Uncaught exception handler", exc_info=(exc_type, exc_value, exc_traceback))

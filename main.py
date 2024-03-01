@@ -9,7 +9,6 @@ from argparse import ArgumentParser
 import node
 from ast import literal_eval
 from pprint import pformat
-from logging.handlers import QueueHandler, QueueListener
 
 # RUN IN PYTHON 3.8.8
 main_status_dictionary = {}
@@ -112,7 +111,7 @@ def listening_procedure(port, timeout, stop_event):
             node_id, received_status_dict = message.split("#", 1)
             received_status_dict = literal_eval(received_status_dict)
 
-            logger.info(f"Receive message from node-{node_id}...")
+            logger.info(f"Receive message from {node_id}...")
             logger.info("Incoming message:\n" + pformat(received_status_dict))
             logger.debug(f"address: {addr}")
 
@@ -154,16 +153,14 @@ def check_node_status(port):
     # Arguments: Node port
     # See example/main.txt for example output
     ""
-    try:
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_socket.connect(("127.0.0.1", port))
-        client_socket.send("status".encode("UTF-8"))
-        data = client_socket.recv(1024).decode("UTF-8")
-        status_dict = literal_eval(data)
-        client_socket.close()
-        print(f"Status Dictionary for node at port {port}:\n{pformat(status_dict)}")
-    except Exception as e:
-        logger.error(f"Failed to check node status at port {port}: {e}")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.connect(("127.0.0.1", port))
+        data = sock.recv(1024).decode('UTF-8')
+    print(f"message_raw: {data}")
+    logging.info(f"message_raw: {data}")
+    node_id, status_dict = data.split("#", 1)
+    print(f"Receive message from {node_id}")
+    logging.info(f"Receive message from {node_id}")
 
 
 def shutdown_nodes(kill_duration):
@@ -196,11 +193,10 @@ def interactive_mode(starting_port, port_used, args):
                 logger.info(f"Node Dictionary:\n{pformat(node_dictionary)}")
                 print(f"Node Dictionary:\n{pformat(node_dictionary)}")
             elif command[0] == "check" and len(command) == 2:
-                print("n should be an integer.")
-                continue
-                # TODO
-                # Check the Status Dictionary of the node with the given node_id
-                # Should print Status Dictionary like status command above
+                if not command[1].isdigit():
+                    print("n should be an integer.")
+                    continue
+
                 node_id = int(command[1])
                 if f"node-{node_id}" in node_dictionary:
                     check_node_status(starting_port + node_id - 1)
@@ -208,8 +204,9 @@ def interactive_mode(starting_port, port_used, args):
                     print(f"Node {node_id} does not exist or is not running.")
 
             elif command[0] == "start" and len(command) == 2:
-                print("n should be an integer.")
-                continue
+                if not command[1].isdigit():
+                    print("n should be an integer.")
+                    continue
 
                 # TODO
                 # Start the node with the given node_id
@@ -240,10 +237,9 @@ def interactive_mode(starting_port, port_used, args):
 
                 node_id = int(command[1])
                 if f"node-{node_id}" in node_dictionary:
+                    main_status_dictionary[f"node-{node_id}"][1] = False
                     process = node_dictionary.pop(f"node-{node_id}")
-                    process.terminate()
-                    process.join()
-                    main_status_dictionary[f"node-{node_id}"] = [0, False]
+                    process.kill()
                     print(f"Node {node_id} killed.")
                 else:
                     print(f"Node {node_id} does not exist or is not running.")

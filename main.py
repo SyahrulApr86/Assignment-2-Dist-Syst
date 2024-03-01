@@ -147,6 +147,7 @@ def listening_procedure(port, timeout, stop_event):
             logger.error(f"Error in listening procedure: {e}")
             break
 
+
 def check_node_status(port):
     # TODO
     # Create a socket to get node status dictionary
@@ -163,6 +164,7 @@ def check_node_status(port):
         print(f"Status Dictionary for node at port {port}:\n{pformat(status_dict)}")
     except Exception as e:
         logger.error(f"Failed to check node status at port {port}: {e}")
+
 
 def shutdown_nodes(kill_duration):
     logger.debug(f"kill_duration: {kill_duration}")
@@ -194,7 +196,8 @@ def interactive_mode(starting_port, port_used, args):
                 logger.info(f"Node Dictionary:\n{pformat(node_dictionary)}")
                 print(f"Node Dictionary:\n{pformat(node_dictionary)}")
             elif command[0] == "check" and len(command) == 2:
-                node_id = int(command[1])
+                print("n should be an integer.")
+                continue
                 # TODO
                 # Check the Status Dictionary of the node with the given node_id
                 # Should print Status Dictionary like status command above
@@ -205,7 +208,9 @@ def interactive_mode(starting_port, port_used, args):
                     print(f"Node {node_id} does not exist or is not running.")
 
             elif command[0] == "start" and len(command) == 2:
-                node_id = int(command[1])
+                print("n should be an integer.")
+                continue
+
                 # TODO
                 # Start the node with the given node_id
                 # Configuration should match the one in setup_nodes
@@ -225,7 +230,7 @@ def interactive_mode(starting_port, port_used, args):
 
             elif command[0] == "kill" and len(command) == 2:
                 if not command[1].isdigit():
-                    print("Invalid command.")
+                    print("n should be an integer.")
                     continue
 
                 # TODO
